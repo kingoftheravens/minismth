@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>MiniCraft Alpha (HTML)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: #87ceeb;
+      font-family: monospace;
+      user-select: none;
+    }
+    #hud {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      background: rgba(0,0,0,0.45);
+      color: #fff;
+      padding: 8px 10px;
+      border-radius: 4px;
+      font-size: 12px;
+      z-index: 10;
+    }
+    #buttons {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      z-index: 10;
+    }
+    button {
+      font-family: monospace;
+      margin-left: 6px;
+      padding: 4px 8px;
+      cursor: pointer;
+    }
+    #crosshair {
+      position: fixed;
+      left: 50%;
+      top: 50%;
+      width: 10px;
+      height: 10px;
+      margin-left: -5px;
+      margin-top: -5px;
+      pointer-events: none;
+      z-index: 5;
+    }
+    #crosshair:before,
+    #crosshair:after {
+      content: "";
+      position: absolute;
+      background: white;
+    }
+    #crosshair:before {
+      left: 4px;
+      top: 0;
+      width: 2px;
+      height: 10px;
+    }
+    #crosshair:after {
+      top: 4px;
+      left: 0;
+      width: 10px;
+      height: 2px;
+    }
+  </style>
+</head>
+<body>
+  <div id="hud">
+    MiniCraft Alpha 1.2-ish<br>
+    WASD move · Mouse look<br>
+    LMB: break · RMB: place<br>
+    1–3 select blocks
+  </div>
+
+  <div id="buttons">
+    <button id="lockBtn">Mouse Lock</button>
+    <button id="fsBtn">Fullscreen</button>
+  </div>
+
+  <div id="crosshair"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+
+  <script>
+  // ================= SAFETY / FEATURE DETECTION =================
+  const canPointerLock = (() => {
+    if (!('requestPointerLock' in document.body)) return false;
+    if ('featurePolicy' in document && document.featurePolicy) {
+      try {
+        return document.featurePolicy.allowsFeature('pointer-lock');
+      } catch {
+        return false;
+      }
+    }
+    // If featurePolicy is unavailable, assume false in sandboxed environments
+    return false;
+  })();
+
+  console.assert(typeof canPointerLock === 'boolean', 'Pointer-lock capability detection failed');
+
+  // ================= BASIC SETUP =================
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.Fog(0x87ceeb, 10, 80);
+
+  const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+  camera.position.set(0, 5, 10);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: false });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(1);
+  document.body.appendChild(renderer.domElement);
+
+  // ================= LIGHTING =================
+  scene.add(new THREE.DirectionalLight(0xffffff, 1));
+  scene.add(new THREE.AmbientLight(0x888888));
+
+  // ================= BLOCKS =================
+  const materials = {
+    grass: new THREE.MeshLambertMaterial({ color: 0x3ba93b }),
+    dirt:  new THREE.MeshLambertMaterial({ color: 0x8b5a2b }),
+    stone: new THREE.MeshLambertMaterial({ color: 0x888888 })
+  };
+
+  const blockTypes = ["grass", "dirt", "stone"];
+  let selectedBlock = 0;
+
+  const world = new Map();
+  const geometry = new THREE.BoxGeometry(1,1,1);
+
+  const key = (x,y,z) => `${x},${y},${z}`;
+
+  function addBlock(x,y,z,type){
+    if(world.has(key(x,y,z))) return;
+    const mesh = new THREE.Mesh(geometry, materials[type]);
+    mesh.position.set(x+0.5,y+0.5,z+0.5);
+    scene.add(mesh);
+    world.set(key(x,y,z), { mesh, type });
+  }
+
+  function removeBlock(x,y,z){
+    const k = key(x,y,z);
+    if(world.has(k)){
+      scene.remove(world.get(k).mesh);
+      world.delete(k);
+    }
+  }
+
+  for(let x=-20;x<20;x++){
+    for(let z=-20;z<20;z++){
+      addBlock(x,0,z,"grass");
+      addBlock(x,-1,z,"dirt");
+      addBlock(x,-2,z,"stone");
+    }
+  }
+
+  console.assert(world.size > 0, 'World failed to generate');
+
+  // ================= INPUT =================
+  let yaw = 0, pitch = 0;
+  let velocity = new THREE.Vector3();
+  const keys = {};
+
+  document.addEventListener('keydown', e => {
+    keys[e.code] = true;
+    if(e.code.startsWith('Digit')){
+      const n = parseInt(e.code.replace('Digit','')) - 1;
+      if(blockTypes[n]) selectedBlock = n;
+    }
+  });
+  document.addEventListener('keyup', e => keys[e.code] = false);
+
+  // ================= POINTER LOCK (SAFE) =================
+  const lockBtn = document.getElementById('lockBtn');
+
+  lockBtn.onclick = () => {
+    if (!canPointerLock) {
+      console.warn('Pointer lock disabled: sandbox or permissions block it');
+      return;
+    }
+    // Safe call: only executed when policy allows it
+    document.body.requestPointerLock();
+  };
+
+  document.addEventListener('mousemove', e => {
+    if(document.pointerLockElement === document.body){
+      yaw   -= e.movementX * 0.0025;
+      pitch -= e.movementY * 0.0025;
+      pitch = Math.max(-Math.PI/2, Math.min(Math.PI/2, pitch));
+    }
+  });
+
+  // ================= FULLSCREEN =================
+  document.getElementById('fsBtn').onclick = () => {
+    if(!document.fullscreenElement){
+      document.body.requestFullscreen().catch(()=>{});
+    } else {
+      document.exitFullscreen();
+    }
+  };
+
+  // ================= RAYCASTING =================
+  const raycaster = new THREE.Raycaster();
+
+  function interact(place=false){
+    raycaster.setFromCamera(new THREE.Vector2(0,0), camera);
+    const hits = raycaster.intersectObjects([...world.values()].map(b=>b.mesh));
+    if(!hits.length) return;
+
+    const hit = hits[0];
+    const p = hit.object.position.clone().subScalar(0.5);
+    const x = Math.floor(p.x);
+    const y = Math.floor(p.y);
+    const z = Math.floor(p.z);
+
+    if(place){
+      const n = hit.face.normal;
+      addBlock(x+n.x, y+n.y, z+n.z, blockTypes[selectedBlock]);
+    } else {
+      removeBlock(x,y,z);
+    }
+  }
+
+  document.addEventListener('mousedown', e => {
+    if(e.button === 0) interact(false);
+    if(e.button === 2) interact(true);
+  });
+
+  document.addEventListener('contextmenu', e => e.preventDefault());
+
+  // ================= LOOP =================
+  function update(){
+    const speed = 0.1;
+    const forward = new THREE.Vector3(Math.sin(yaw),0,Math.cos(yaw));
+    const right   = new THREE.Vector3(Math.cos(yaw),0,-Math.sin(yaw));
+
+    if(keys.KeyW) velocity.add(forward.clone().multiplyScalar(speed));
+    if(keys.KeyS) velocity.add(forward.clone().multiplyScalar(-speed));
+    if(keys.KeyA) velocity.add(right.clone().multiplyScalar(-speed));
+    if(keys.KeyD) velocity.add(right.clone().multiplyScalar(speed));
+
+    camera.position.add(velocity);
+    velocity.multiplyScalar(0.6);
+
+    camera.rotation.order = 'YXZ';
+    camera.rotation.y = yaw;
+    camera.rotation.x = pitch;
+
+    renderer.render(scene, camera);
+    requestAnimationFrame(update);
+  }
+
+  update();
+
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+  </script>
+</body>
+</html>
